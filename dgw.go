@@ -5,13 +5,14 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
-	"github.com/lib/pq"
 	"go/format"
 	"io/ioutil"
 	"regexp"
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/lib/pq"
 
 	"github.com/BurntSushi/toml"
 	"github.com/achiku/varfmt"
@@ -449,18 +450,18 @@ func PgEnumToType(e *PgEnum, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*E
 	for _, v := range e.Values {
 		en.Values = append(en.Values, EnumValue{
 			Type:  en,
-			Name:  en.Name + "_" + varfmt.PublicVarName(v),
+			Name:  varfmt.PublicVarName(v) + en.Name,
 			Value: v,
 		})
 	}
-	if _,ok := typeCfg[e.Name]; !ok {
+	if _, ok := typeCfg[e.Name]; !ok {
 		typeCfg[e.Name] = &TypeMap{
 			DBTypes:        []string{e.Name},
 			NotNullGoType:  en.Name,
-			NullableGoType: "Null"+en.Name,
+			NullableGoType: "Null" + en.Name,
 
-			compiled:       true,
-			rePatterns:     nil,
+			compiled:   true,
+			rePatterns: nil,
 		}
 	}
 
