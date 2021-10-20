@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"go/format"
 	"io/ioutil"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
 	"text/template"
+	"unicode"
 
 	"github.com/lib/pq"
 
 	"github.com/BurntSushi/toml"
-	"github.com/achiku/varfmt"
 	_ "github.com/lib/pq" // postgres
 	"github.com/pkg/errors"
 )
@@ -362,7 +363,7 @@ func PgConvertType(col *PgColumn, typeCfg PgTypeMapConfig) string {
 func PgColToField(col *PgColumn, typeCfg PgTypeMapConfig) (*StructField, error) {
 	stfType := PgConvertType(col, typeCfg)
 	stf := &StructField{
-		Name:   varfmt.PublicVarName(col.Name),
+		Name:   PublicVarName(col.Name),
 		Type:   stfType,
 		Column: col,
 	}
@@ -373,7 +374,7 @@ func PgColToField(col *PgColumn, typeCfg PgTypeMapConfig) (*StructField, error) 
 func PgTableToStruct(t *PgTable, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*Struct, error) {
 	t.setPrimaryKeyInfo(keyConfig)
 	s := &Struct{
-		Name:  varfmt.PublicVarName(t.Name),
+		Name:  PublicVarName(t.Name),
 		Table: t,
 	}
 	var fs []*StructField
@@ -444,13 +445,13 @@ func getPgTypeMapConfig(typeMapPath string) (PgTypeMapConfig, error) {
 
 func PgEnumToType(e *PgEnum, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*EnumType, error) {
 	en := &EnumType{
-		Name: varfmt.PublicVarName(e.Name),
+		Name: PublicVarName(e.Name),
 		Enum: e,
 	}
 	for _, v := range e.Values {
 		en.Values = append(en.Values, EnumValue{
 			Type:  en,
-			Name:  varfmt.PublicVarName(v) + en.Name,
+			Name:  PublicVarName(v) + en.Name,
 			Value: v,
 		})
 	}
@@ -468,18 +469,19 @@ func PgEnumToType(e *PgEnum, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*E
 	return en, nil
 }
 
-func PgCreateEnums(db Queryer, schema string, cfg PgTypeMapConfig, customTmpl string) ([]byte, error) {
-	var src []byte
+func PgCreateEnums(db Queryer, schema string, cfg PgTypeMapConfig, customTmpl string) (map[string][]byte, error) {
+	out := make(map[string][]byte, 0)
 
 	enums, err := PgLoadEnumDef(db, schema)
 	if err != nil {
-		return src, errors.Wrap(err, "failed to load enum definitions")
+		return nil, errors.Wrap(err, "failed to load enum definitions")
 	}
 
 	for _, pgEnum := range enums {
+		var src []byte
 		enum, err := PgEnumToType(pgEnum, cfg, autoGenKeyCfg)
 		if err != nil {
-			return src, errors.Wrap(err, "failed to convert enum definition to type")
+			return nil, errors.Wrap(err, "failed to convert enum definition to type")
 		}
 
 		if customTmpl != "" {
@@ -495,33 +497,40 @@ func PgCreateEnums(db Queryer, schema string, cfg PgTypeMapConfig, customTmpl st
 		} else {
 			s, err := PgExecuteDefaultTmpl(enum, "template/enum.tmpl")
 			if err != nil {
-				return src, errors.Wrap(err, "failed to execute template")
+				return nil, errors.Wrap(err, "failed to execute template")
 			}
 			src = append(src, s...)
 		}
+
+		out[pgEnum.Name] = src
 	}
-	return src, nil
+	return out, nil
 }
 
 // PgCreateStruct creates struct from given schema
 func PgCreateStruct(
-	db Queryer, schema string, cfg PgTypeMapConfig, pkgName, customTmpl string, exTbls []string) ([]byte, error) {
-	var src []byte
-	pkgDef := []byte(fmt.Sprintf("package %s\n\n", pkgName))
-	src = append(src, pkgDef...)
+	db Queryer, schema string, cfg PgTypeMapConfig, pkgName, customTmpl, customEnumTmpl string, exTbls []string) (map[string][]byte, error) {
+	enums, err := PgCreateEnums(db, schema, cfg, customEnumTmpl)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	out := make(map[string][]byte, 0)
 
 	tbls, err := PgLoadTableDef(db, schema)
 	if err != nil {
-		return src, errors.Wrap(err, "failed to load table definitions")
+		return nil, errors.Wrap(err, "failed to load table definitions")
 	}
 
 	for _, tbl := range tbls {
+		src := []byte(fmt.Sprintf("package %s\n\n", pkgName))
+
 		if contains(tbl.Name, exTbls) {
 			continue
 		}
 		st, err := PgTableToStruct(tbl, cfg, autoGenKeyCfg)
 		if err != nil {
-			return src, errors.Wrap(err, "failed to convert table definition to struct")
+			return nil, errors.Wrap(err, "failed to convert table definition to struct")
 		}
 		if customTmpl != "" {
 			tmpl, err := ioutil.ReadFile(customTmpl)
@@ -536,15 +545,166 @@ func PgCreateStruct(
 		} else {
 			s, err := PgExecuteDefaultTmpl(&StructTmpl{Struct: st}, "template/struct.tmpl")
 			if err != nil {
-				return src, errors.Wrap(err, "failed to execute template")
+				return nil, errors.Wrap(err, "failed to execute template")
 			}
 			m, err := PgExecuteDefaultTmpl(&StructTmpl{Struct: st}, "template/method.tmpl")
 			if err != nil {
-				return src, errors.Wrap(err, "failed to execute template")
+				return nil, errors.Wrap(err, "failed to execute template")
 			}
 			src = append(src, s...)
 			src = append(src, m...)
 		}
+
+		out[st.Name+".go"] = src
+
+		for _, col := range tbl.Columns {
+			if enum, ok := enums[col.DataType]; ok {
+				out[st.Name+".go"] = append(out[st.Name+".go"], enum...)
+				delete(enums, col.DataType)
+			}
+		}
 	}
-	return src, nil
+	return out, nil
+}
+
+var commonInitialisms = map[string]bool{
+	"API":   true,
+	"ASCII": true,
+	"CPU":   true,
+	"CSS":   true,
+	"DNS":   true,
+	"EOF":   true,
+	"GUID":  true,
+	"HTML":  true,
+	"HTTP":  true,
+	"HTTPS": true,
+	"ID":    true,
+	"IP":    true,
+	"JSON":  true,
+	"LHS":   true,
+	"QPS":   true,
+	"RAM":   true,
+	"RHS":   true,
+	"RPC":   true,
+	"SLA":   true,
+	"SMTP":  true,
+	"SSH":   true,
+	"TLS":   true,
+	"TTL":   true,
+	"UI":    true,
+	"UID":   true,
+	"UUID":  true,
+	"URI":   true,
+	"URL":   true,
+	"UTF8":  true,
+	"VM":    true,
+	"XML":   true,
+	"PTO":   true,
+}
+
+// PublicVarName formats a string as a public go variable name
+func PublicVarName(s string) string {
+	name := lintFieldName(s)
+	runes := []rune(name)
+	for i, c := range runes {
+		ok := unicode.IsLetter(c) || unicode.IsDigit(c)
+		if i == 0 {
+			ok = unicode.IsLetter(c)
+		}
+		if !ok {
+			runes[i] = '_'
+		}
+	}
+
+	newName := string(runes)
+
+	if strings.Index(newName, "Policies") != -1 {
+		newName = strings.Replace(newName, "Policies", "Policy", 1)
+	}
+
+	if strings.Index(newName, "Pto") != -1 {
+		newName = strings.Replace(newName, "Pto", "PTO", 1)
+	}
+
+	if strings.Index(newName, "atus") == -1 && name[len(newName)-1] == 's' {
+		newName = newName[:len(newName)-1]
+	}
+
+	return newName
+}
+
+func lintFieldName(name string) string {
+	// Fast path for simple cases: "_" and all lowercase.
+	if name == "_" {
+		return name
+	}
+
+	for len(name) > 0 && name[0] == '_' {
+		name = name[1:]
+	}
+
+	allLower := true
+	for _, r := range name {
+		if !unicode.IsLower(r) {
+			allLower = false
+			break
+		}
+	}
+	if allLower {
+		runes := []rune(name)
+		if u := strings.ToUpper(name); commonInitialisms[u] {
+			copy(runes[0:], []rune(u))
+		} else {
+			runes[0] = unicode.ToUpper(runes[0])
+		}
+		return string(runes)
+	}
+
+	// Split camelCase at any lower->upper transition, and split on underscores.
+	// Check each word for common initialisms.
+	runes := []rune(name)
+	w, i := 0, 0 // index of start of word, scan
+	for i+1 <= len(runes) {
+		eow := false // whether we hit the end of a word
+
+		if i+1 == len(runes) {
+			eow = true
+		} else if runes[i+1] == '_' {
+			// underscore; shift the remainder forward over any run of underscores
+			eow = true
+			n := 1
+			for i+n+1 < len(runes) && runes[i+n+1] == '_' {
+				n++
+			}
+
+			// Leave at most one underscore if the underscore is between two digits
+			if i+n+1 < len(runes) && unicode.IsDigit(runes[i]) && unicode.IsDigit(runes[i+n+1]) {
+				n--
+			}
+
+			copy(runes[i+1:], runes[i+n+1:])
+			runes = runes[:len(runes)-n]
+		} else if unicode.IsLower(runes[i]) && !unicode.IsLower(runes[i+1]) {
+			// lower->non-lower
+			eow = true
+		}
+		i++
+		if !eow {
+			continue
+		}
+
+		// [w,i) is a word.
+		word := string(runes[w:i])
+		if u := strings.ToUpper(word); commonInitialisms[u] {
+			// All the common initialisms are ASCII,
+			// so we can replace the bytes exactly.
+			copy(runes[w:], []rune(u))
+
+		} else if strings.ToLower(word) == word {
+			// already all lowercase, and not the first word, so uppercase the first character.
+			runes[w] = unicode.ToUpper(runes[w])
+		}
+		w = i
+	}
+	return string(runes)
 }
