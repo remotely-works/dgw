@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"unicode"
 
+	"github.com/iancoleman/strcase"
 	"github.com/lib/pq"
 
 	"github.com/BurntSushi/toml"
@@ -126,6 +127,19 @@ AND c.relkind = 'r'
 ORDER BY c.relname
 `
 
+const pgLoadColumnConstraint = `
+SELECT pg_get_constraintdef(ct.oid) as condef
+FROM pg_attribute a
+JOIN ONLY pg_class c ON c.oid = a.attrelid
+JOIN ONLY pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_constraint ct ON  a.attnum = ANY(ct.conkey) AND  ct.conrelid = c.oid
+	AND ct.contype = $4
+WHERE
+n.nspname = $1
+AND c.relname = $2
+AND a.attname = $3
+`
+
 // TypeMap go/db type map struct
 type TypeMap struct {
 	DBTypes        []string `toml:"db_types"`
@@ -201,6 +215,7 @@ type PgColumn struct {
 	NotNull      bool
 	DefaultValue sql.NullString
 	IsPrimaryKey bool
+	IsUnique     bool
 }
 
 // Struct go struct
@@ -298,7 +313,6 @@ func PgLoadColumnDef(db Queryer, schema string, table string) ([]*PgColumn, erro
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to scan")
 		}
-
 		// Some data types have an extra part e.g, "character varying(16)" and
 		// "numeric(10, 5)". We want to drop the extra part.
 		if i := strings.Index(c.DataType, "("); i > 0 {
@@ -360,26 +374,124 @@ func PgConvertType(col *PgColumn, typeCfg PgTypeMapConfig) string {
 }
 
 // PgColToField converts pg column to go struct field
-func PgColToField(col *PgColumn, typeCfg PgTypeMapConfig) (*StructField, error) {
+func PgColToField(db Queryer, t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) (*StructField, error) {
 	stfType := PgConvertType(col, typeCfg)
 	stf := &StructField{
-		Name:   PublicVarName(col.Name),
+		Name:   PublicVarName(col.Name, false),
 		Type:   stfType,
 		Column: col,
 	}
-	return stf, nil
+	return fillStructTags(db, stf, t, col)
+}
+
+func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*StructField, error) {
+	var tags []string
+	tags = append(tags, fmt.Sprintf(`db:"%s"`, col.Name))
+	if col.IsPrimaryKey {
+		tags = append(tags, `pk:"true"`)
+	}
+
+	unique, err := isUnique(db, st, t, col)
+	if err != nil {
+		return nil, err
+	}
+
+	if unique {
+		tags = append(tags, `unique:"true"`)
+	}
+
+	fk, err := hasForeignKey(db, st, t, col)
+	if err != nil {
+		return nil, err
+	}
+
+	if fk != "" {
+		tags = append(tags, fmt.Sprintf(`fk:"%s"`, fk))
+	}
+
+	var ommitEmpty bool
+	if strings.Contains(col.DefaultValue.String, "nextval") {
+		tags = append(tags, `auto:"true"`)
+		ommitEmpty = true
+	} else {
+		if col.DefaultValue.Valid {
+			parts := strings.Split(col.DefaultValue.String, "'")
+			defaultVal := parts[0]
+			if len(parts) > 1 {
+				defaultVal = parts[1]
+			}
+
+			if defaultVal != "" {
+				ommitEmpty = true
+				tags = append(tags, fmt.Sprintf(`default:"%s"`, defaultVal))
+			}
+		}
+	}
+
+	if !col.NotNull {
+		ommitEmpty = true
+	}
+
+	var ommit string
+	if ommitEmpty {
+		ommit = ",ommitempty"
+	}
+
+	tags = append([]string{fmt.Sprintf(`json:"%s%s"`, col.Name, ommit)}, tags...)
+	st.Tag = strings.Join(tags, " ")
+
+	return st, nil
+}
+
+func isUnique(db Queryer, st *StructField, t *PgTable, col *PgColumn) (bool, error) {
+	colDefs, err := db.Query(pgLoadColumnConstraint, t.Schema, t.Name, col.Name, "u")
+	if err != nil {
+		return false, errors.Wrap(err, "failed to load column constraint")
+	}
+	defer colDefs.Close()
+
+	var cont sql.NullString
+	if colDefs.Next() {
+		if err := colDefs.Scan(&cont); err != nil {
+			return false, err
+		}
+	}
+
+	return cont.String != "", nil
+}
+
+func hasForeignKey(db Queryer, st *StructField, t *PgTable, col *PgColumn) (string, error) {
+	colDefs, err := db.Query(pgLoadColumnConstraint, t.Schema, t.Name, col.Name, "f")
+	if err != nil {
+		return "", errors.Wrap(err, "failed to load column constraint")
+	}
+	defer colDefs.Close()
+
+	var cont sql.NullString
+	if colDefs.Next() {
+		if err := colDefs.Scan(&cont); err != nil {
+			return "", err
+		}
+	}
+
+	parts := strings.Split(cont.String, "REFERENCES ")
+	if len(parts) == 1 {
+		return "", nil
+	}
+
+	return parts[1], nil
 }
 
 // PgTableToStruct converts table def to go struct
-func PgTableToStruct(t *PgTable, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*Struct, error) {
+func PgTableToStruct(db Queryer, t *PgTable, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*Struct, error) {
 	t.setPrimaryKeyInfo(keyConfig)
 	s := &Struct{
-		Name:  PublicVarName(t.Name),
+		Name:  PublicVarName(t.Name, true),
 		Table: t,
 	}
 	var fs []*StructField
 	for _, c := range t.Columns {
-		f, err := PgColToField(c, typeCfg)
+		f, err := PgColToField(db, t, c, typeCfg)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to convert col to field")
 		}
@@ -445,13 +557,13 @@ func getPgTypeMapConfig(typeMapPath string) (PgTypeMapConfig, error) {
 
 func PgEnumToType(e *PgEnum, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*EnumType, error) {
 	en := &EnumType{
-		Name: PublicVarName(e.Name),
+		Name: PublicVarName(e.Name, true),
 		Enum: e,
 	}
 	for _, v := range e.Values {
 		en.Values = append(en.Values, EnumValue{
 			Type:  en,
-			Name:  PublicVarName(v) + en.Name,
+			Name:  PublicVarName(v, true) + en.Name,
 			Value: v,
 		})
 	}
@@ -528,7 +640,7 @@ func PgCreateStruct(
 		if contains(tbl.Name, exTbls) {
 			continue
 		}
-		st, err := PgTableToStruct(tbl, cfg, autoGenKeyCfg)
+		st, err := PgTableToStruct(db, tbl, cfg, autoGenKeyCfg)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to convert table definition to struct")
 		}
@@ -555,11 +667,12 @@ func PgCreateStruct(
 			src = append(src, m...)
 		}
 
-		out[st.Name+".go"] = src
+		filename := fmt.Sprintf("%s.go", strcase.ToSnake(st.Name))
+		out[filename] = src
 
 		for _, col := range tbl.Columns {
 			if enum, ok := enums[col.DataType]; ok {
-				out[st.Name+".go"] = append(out[st.Name+".go"], enum...)
+				out[filename] = append(out[filename], enum...)
 				delete(enums, col.DataType)
 			}
 		}
@@ -603,7 +716,7 @@ var commonInitialisms = map[string]bool{
 }
 
 // PublicVarName formats a string as a public go variable name
-func PublicVarName(s string) string {
+func PublicVarName(s string, isTable bool) string {
 	name := lintFieldName(s)
 	runes := []rune(name)
 	for i, c := range runes {
@@ -618,6 +731,14 @@ func PublicVarName(s string) string {
 
 	newName := string(runes)
 
+	if strings.Index(newName, "BackAc") != -1 {
+		newName = strings.Replace(newName, "BackAc", "BankAc", 1)
+	}
+
+	if !isTable {
+		return newName
+	}
+
 	if strings.Index(newName, "Policies") != -1 {
 		newName = strings.Replace(newName, "Policies", "Policy", 1)
 	}
@@ -626,7 +747,7 @@ func PublicVarName(s string) string {
 		newName = strings.Replace(newName, "Pto", "PTO", 1)
 	}
 
-	if strings.Index(newName, "atus") == -1 && name[len(newName)-1] == 's' {
+	if strings.Index(newName, "Kids") == -1 && strings.Index(newName, "Days") == -1 && strings.Index(newName, "Comments") == -1 && strings.Index(newName, "atus") == -1 && strings.Index(newName, "ress") == -1 && name[len(newName)-1] == 's' {
 		newName = newName[:len(newName)-1]
 	}
 
