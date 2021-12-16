@@ -386,7 +386,6 @@ func PgColToField(db Queryer, t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig
 
 func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*StructField, error) {
 	var tags []string
-	tags = append(tags, fmt.Sprintf(`db:"%s"`, col.Name))
 	if col.IsPrimaryKey {
 		tags = append(tags, `pk:"true"`)
 	}
@@ -409,10 +408,10 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 		tags = append(tags, fmt.Sprintf(`fk:"%s"`, fk))
 	}
 
-	var ommitEmpty bool
+	var omitEmpty bool
 	if strings.Contains(col.DefaultValue.String, "nextval") {
 		tags = append(tags, `auto:"true"`)
-		ommitEmpty = true
+		omitEmpty = true
 	} else {
 		if col.DefaultValue.Valid {
 			parts := strings.Split(col.DefaultValue.String, "'")
@@ -422,22 +421,26 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 			}
 
 			if defaultVal != "" {
-				ommitEmpty = true
+				omitEmpty = true
+				if !strings.Contains(defaultVal, "(") {
+					defaultVal = "'" + defaultVal + "'"
+				}
+
 				tags = append(tags, fmt.Sprintf(`default:"%s"`, defaultVal))
 			}
 		}
 	}
 
 	if !col.NotNull {
-		ommitEmpty = true
+		omitEmpty = true
 	}
 
-	var ommit string
-	if ommitEmpty {
-		ommit = ",ommitempty"
+	var omit string
+	if omitEmpty {
+		omit = ",omitempty"
 	}
 
-	tags = append([]string{fmt.Sprintf(`json:"%s%s"`, col.Name, ommit)}, tags...)
+	tags = append([]string{fmt.Sprintf(`db:"%s" json:"%s%s"`, col.Name, col.Name, omit)}, tags...)
 	st.Tag = strings.Join(tags, " ")
 
 	return st, nil
