@@ -286,6 +286,8 @@ func PgLoadEnumDef(db Queryer, schema string) ([]*PgEnum, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to scan")
 		}
+
+		e.Name = strings.Replace(e.Name, `"`, "", -1)
 		enums = append(enums, e)
 	}
 	return enums, nil
@@ -313,6 +315,8 @@ func PgLoadColumnDef(db Queryer, schema string, table string) ([]*PgColumn, erro
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to scan")
 		}
+
+		c.DataType = strings.Replace(c.DataType, `"`, "", -1)
 		// Some data types have an extra part e.g, "character varying(16)" and
 		// "numeric(10, 5)". We want to drop the extra part.
 		if i := strings.Index(c.DataType, "("); i > 0 {
@@ -405,6 +409,7 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 	}
 
 	if fk != "" {
+
 		tags = append(tags, fmt.Sprintf(`fk:"%s"`, fk))
 	}
 
@@ -482,7 +487,9 @@ func hasForeignKey(db Queryer, st *StructField, t *PgTable, col *PgColumn) (stri
 		return "", nil
 	}
 
-	return parts[1], nil
+	parts = strings.Split(parts[1], `)`)
+	fk := strings.ReplaceAll(parts[0], `"`, "") + ")"
+	return fk, nil
 }
 
 // PgTableToStruct converts table def to go struct
