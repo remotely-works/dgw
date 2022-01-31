@@ -419,18 +419,11 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 		omitEmpty = true
 	} else {
 		if col.DefaultValue.Valid {
-			parts := strings.Split(col.DefaultValue.String, "'")
+			parts := strings.Split(col.DefaultValue.String, "::")
 			defaultVal := parts[0]
-			if len(parts) > 1 {
-				defaultVal = parts[1]
-			}
 
 			if defaultVal != "" {
 				omitEmpty = true
-				if !strings.Contains(defaultVal, "(") && defaultVal != "false" && defaultVal != "true" {
-					defaultVal = "'" + defaultVal + "'"
-				}
-
 				tags = append(tags, fmt.Sprintf(`default:"%s"`, defaultVal))
 			}
 		}
