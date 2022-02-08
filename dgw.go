@@ -142,6 +142,7 @@ AND a.attname = $3
 
 // TypeMap go/db type map struct
 type TypeMap struct {
+	Tables         []string `toml:"tables"`
 	DBTypes        []string `toml:"db_types"`
 	NotNullGoType  string   `toml:"notnull_go_type"`
 	NullableGoType string   `toml:"nullable_go_type"`
@@ -150,7 +151,7 @@ type TypeMap struct {
 	rePatterns []*regexp.Regexp
 }
 
-func (t *TypeMap) Match(s string) bool {
+func (t *TypeMap) Match(table string, s string) bool {
 	if !t.compiled {
 		for _, v := range t.DBTypes {
 			if strings.HasPrefix(v, "re/") {
@@ -158,14 +159,21 @@ func (t *TypeMap) Match(s string) bool {
 			}
 		}
 	}
+
+	if len(t.Tables) != 0 && !contains(table, t.Tables) {
+		return false
+	}
+
 	if contains(s, t.DBTypes) {
 		return true
 	}
+
 	for _, v := range t.rePatterns {
 		if v.MatchString(s) {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -364,10 +372,27 @@ func contains(v string, l []string) bool {
 }
 
 // PgConvertType converts type
-func PgConvertType(col *PgColumn, typeCfg PgTypeMapConfig) string {
+func PgConvertType(t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) string {
 	typ := typeCfg["default"].NotNullGoType
 	for _, v := range typeCfg {
-		if v.Match(col.DataType) {
+		if v.Tables == nil {
+			continue
+		}
+
+		if v.Match(t.Name, col.DataType) {
+			if col.NotNull {
+				return v.NotNullGoType
+			}
+			return v.NullableGoType
+		}
+	}
+
+	for _, v := range typeCfg {
+		if v.Tables != nil {
+			continue
+		}
+
+		if v.Match(t.Name, col.DataType) {
 			if col.NotNull {
 				return v.NotNullGoType
 			}
@@ -379,7 +404,7 @@ func PgConvertType(col *PgColumn, typeCfg PgTypeMapConfig) string {
 
 // PgColToField converts pg column to go struct field
 func PgColToField(db Queryer, t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) (*StructField, error) {
-	stfType := PgConvertType(col, typeCfg)
+	stfType := PgConvertType(t, col, typeCfg)
 	stf := &StructField{
 		Name:   PublicVarName(col.Name, false),
 		Type:   stfType,
