@@ -434,7 +434,6 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 	}
 
 	if fk != "" {
-
 		tags = append(tags, fmt.Sprintf(`fk:"%s"`, fk))
 	}
 
@@ -452,6 +451,10 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 				tags = append(tags, fmt.Sprintf(`default:"%s"`, defaultVal))
 			}
 		}
+	}
+
+	if col.DataType == "json" || col.DataType == "jsonb" {
+		tags = append(tags, fmt.Sprintf(`type:"%s"`, col.DataType))
 	}
 
 	if !col.NotNull {
