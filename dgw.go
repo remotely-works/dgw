@@ -453,7 +453,7 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 		}
 	}
 
-	if col.DataType == "json" || col.DataType == "jsonb" || col.DataType == "numeric" {
+	if col.DataType == "json" || col.DataType == "jsonb" || col.DataType == "numeric" || col.DataType == "date" {
 		tags = append(tags, fmt.Sprintf(`type:"%s"`, col.DataType))
 	}
 
@@ -602,7 +602,7 @@ func PgEnumToType(e *PgEnum, typeCfg PgTypeMapConfig, keyConfig *AutoKeyMap) (*E
 		typeCfg[e.Name] = &TypeMap{
 			DBTypes:        []string{e.Name},
 			NotNullGoType:  en.Name,
-			NullableGoType: "Null" + en.Name,
+			NullableGoType: "*" + en.Name,
 
 			compiled:   true,
 			rePatterns: nil,
