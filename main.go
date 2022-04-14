@@ -20,6 +20,7 @@ var (
 	exTbls          = kingpin.Flag("exclude", "table names to exclude").Short('x').Strings()
 	customTmpl      = kingpin.Flag("template", "custom template path").String()
 	customEnumTmpl  = kingpin.Flag("enum-template", "custom enum template").String()
+	schemaTmpl      = kingpin.Flag("schema-template", "custom schema template").String()
 	outFile         = kingpin.Flag("output", "output file path").Short('o').String()
 )
 
@@ -36,7 +37,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	st, err := PgCreateStruct(conn, *schema, cfg, *pkgName, *customTmpl, *customEnumTmpl, *exTbls)
+	st, err := PgCreateStruct(conn, *schema, cfg, *pkgName, *customTmpl, *customEnumTmpl, *schemaTmpl, *exTbls)
 	if err != nil {
 		log.Fatal(err)
 	}

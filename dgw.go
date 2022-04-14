@@ -239,6 +239,11 @@ type StructTmpl struct {
 	Struct *Struct
 }
 
+type SchemaTmpl struct {
+	Package string
+	Structs []*Struct
+}
+
 // StructField go struct field
 type StructField struct {
 	Name   string
@@ -652,18 +657,25 @@ func PgCreateEnums(db Queryer, schema string, cfg PgTypeMapConfig, customTmpl st
 
 // PgCreateStruct creates struct from given schema
 func PgCreateStruct(
-	db Queryer, schema string, cfg PgTypeMapConfig, pkgName, customTmpl, customEnumTmpl string, exTbls []string) (map[string][]byte, error) {
-	enums, err := PgCreateEnums(db, schema, cfg, customEnumTmpl)
+	db Queryer, schemaSQL string, cfg PgTypeMapConfig, pkgName, customTmpl, customEnumTmpl, schemaTmpl string, exTbls []string) (map[string][]byte, error) {
+	enums, err := PgCreateEnums(db, schemaSQL, cfg, customEnumTmpl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	out := make(map[string][]byte, 0)
 
-	tbls, err := PgLoadTableDef(db, schema)
+	tbls, err := PgLoadTableDef(db, schemaSQL)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load table definitions")
 	}
+
+	schemaTmplSrc, err := ioutil.ReadFile(schemaTmpl)
+	if err != nil {
+		return nil, err
+	}
+
+	sch := &SchemaTmpl{Package: pkgName}
 
 	for _, tbl := range tbls {
 		src := []byte(fmt.Sprintf("package %s\n\n", pkgName))
@@ -675,6 +687,9 @@ func PgCreateStruct(
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to convert table definition to struct")
 		}
+
+		sch.Structs = append(sch.Structs, st)
+
 		if customTmpl != "" {
 			tmpl, err := ioutil.ReadFile(customTmpl)
 			if err != nil {
@@ -708,6 +723,13 @@ func PgCreateStruct(
 			}
 		}
 	}
+
+	s, err := PgExecuteCustomTmpl(sch, string(schemaTmplSrc))
+	if err != nil {
+		return nil, errors.Wrap(err, "PgExecuteCustomTmpl failed")
+	}
+
+	out["schema.go"] = s
 	return out, nil
 }
 
