@@ -766,6 +766,7 @@ var commonInitialisms = map[string]bool{
 	"VM":    true,
 	"XML":   true,
 	"PTO":   true,
+	"UTM":   true,
 }
 
 // PublicVarName formats a string as a public go variable name
@@ -798,6 +799,10 @@ func PublicVarName(s string, isTable bool) string {
 
 	if strings.Index(newName, "Pto") != -1 {
 		newName = strings.Replace(newName, "Pto", "PTO", 1)
+	}
+
+	if strings.Index(newName, "Utm") != -1 {
+		newName = strings.Replace(newName, "Utm", "UTM", 1)
 	}
 
 	if strings.Index(newName, "Kids") == -1 && strings.Index(newName, "Days") == -1 && strings.Index(newName, "Comments") == -1 && strings.Index(newName, "atus") == -1 && strings.Index(newName, "ress") == -1 && name[len(newName)-1] == 's' {
