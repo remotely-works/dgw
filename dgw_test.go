@@ -40,7 +40,7 @@ func testSetupStruct(t *testing.T, conn *sql.DB) []*Struct {
 
 	var sts []*Struct
 	for _, tbl := range tbls {
-		st, err := PgTableToStruct(tbl, defaultTypeMapCfg, autoGenKeyCfg)
+		st, err := PgTableToStruct(conn, tbl, defaultTypeMapCfg, autoGenKeyCfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,13 +84,25 @@ func TestPgColToField(t *testing.T) {
 
 	schema := "public"
 	table := "t1"
+	tables, err := PgLoadTableDef(conn, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var tbl *PgTable
+	for _, t := range tables {
+		if t.Name == table {
+			tbl = t
+		}
+	}
+
 	cols, err := PgLoadColumnDef(conn, schema, table)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for _, c := range cols {
-		f, err := PgColToField(c, defaultTypeMapCfg)
+		f, err := PgColToField(conn, tbl, c, defaultTypeMapCfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -120,7 +132,7 @@ func TestPgTableToStruct(t *testing.T) {
 	}
 
 	for _, tbl := range tbls {
-		st, err := PgTableToStruct(tbl, defaultTypeMapCfg, autoGenKeyCfg)
+		st, err := PgTableToStruct(conn, tbl, defaultTypeMapCfg, autoGenKeyCfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +154,7 @@ func TestPgTableToMethod(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tbl := range tbls {
-		st, err := PgTableToStruct(tbl, defaultTypeMapCfg, autoGenKeyCfg)
+		st, err := PgTableToStruct(conn, tbl, defaultTypeMapCfg, autoGenKeyCfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +185,7 @@ func TestPgExecuteCustomTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tbl := range tbls {
-		st, err := PgTableToStruct(tbl, defaultTypeMapCfg, autoGenKeyCfg)
+		st, err := PgTableToStruct(conn, tbl, defaultTypeMapCfg, autoGenKeyCfg)
 		if err != nil {
 			t.Fatal(err)
 		}
