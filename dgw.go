@@ -793,6 +793,10 @@ func PublicVarName(s string, isTable bool) string {
 		return newName
 	}
 
+	if strings.Index(newName, "Policies") != -1 {
+		newName = strings.Replace(newName, "Policies", "Policy", 1)
+	}
+
 	if strings.Index(newName, "Pto") != -1 {
 		newName = strings.Replace(newName, "Pto", "PTO", 1)
 	}
