@@ -717,9 +717,12 @@ func PgCreateStruct(
 		out[filename] = src
 
 		for _, col := range tbl.Columns {
-			if enum, ok := enums[col.DataType]; ok {
+			// To generate the enums for types that use it in an array we need to remove
+			// the suffix from the array type definition.
+			dataType := strings.TrimRight(col.DataType, "[]")
+			if enum, ok := enums[dataType]; ok {
 				out[filename] = append(out[filename], enum...)
-				delete(enums, col.DataType)
+				delete(enums, dataType)
 			}
 		}
 	}
