@@ -143,6 +143,7 @@ AND a.attname = $3
 // TypeMap go/db type map struct
 type TypeMap struct {
 	Tables         []string `toml:"tables"`
+	Fields         []string `toml:"fields"`
 	DBTypes        []string `toml:"db_types"`
 	NotNullGoType  string   `toml:"notnull_go_type"`
 	NullableGoType string   `toml:"nullable_go_type"`
@@ -151,7 +152,7 @@ type TypeMap struct {
 	rePatterns []*regexp.Regexp
 }
 
-func (t *TypeMap) Match(table string, s string) bool {
+func (t *TypeMap) Match(table, field, s string) bool {
 	if !t.compiled {
 		for _, v := range t.DBTypes {
 			if strings.HasPrefix(v, "re/") {
@@ -161,6 +162,10 @@ func (t *TypeMap) Match(table string, s string) bool {
 	}
 
 	if len(t.Tables) != 0 && !contains(table, t.Tables) {
+		return false
+	}
+
+	if len(t.Fields) != 0 && !contains(field, t.Fields) {
 		return false
 	}
 
@@ -384,7 +389,7 @@ func PgConvertType(t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) string {
 			continue
 		}
 
-		if v.Match(t.Name, col.DataType) {
+		if v.Match(t.Name, col.Name, col.DataType) {
 			if col.NotNull {
 				return v.NotNullGoType
 			}
@@ -397,7 +402,7 @@ func PgConvertType(t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) string {
 			continue
 		}
 
-		if v.Match(t.Name, col.DataType) {
+		if v.Match(t.Name, col.Name, col.DataType) {
 			if col.NotNull {
 				return v.NotNullGoType
 			}

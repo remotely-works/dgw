@@ -56,8 +56,10 @@ func main() {
 		}
 
 		params := []string{"-w", fullpath}
-		if err := exec.Command("goimports", params...).Run(); err != nil {
-			log.Fatalf("failed to goimports: %s", err)
+		cmd := exec.Command("goimports", params...)
+		cmd.Stdout = os.Stdout
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("failed to goimports %q: %s", fullpath, err)
 		}
 	}
 }
