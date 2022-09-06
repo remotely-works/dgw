@@ -147,12 +147,13 @@ type TypeMap struct {
 	DBTypes        []string `toml:"db_types"`
 	NotNullGoType  string   `toml:"notnull_go_type"`
 	NullableGoType string   `toml:"nullable_go_type"`
+	Tags           string   `toml:"tags"`
 
 	compiled   bool
 	rePatterns []*regexp.Regexp
 }
 
-func (t *TypeMap) Match(table, field, s string) bool {
+func (t *TypeMap) match(table, field, s string) bool {
 	if !t.compiled {
 		for _, v := range t.DBTypes {
 			if strings.HasPrefix(v, "re/") {
@@ -189,6 +190,45 @@ type AutoKeyMap struct {
 
 // PgTypeMapConfig go/db type map struct toml config
 type PgTypeMapConfig map[string]*TypeMap
+
+func (c PgTypeMapConfig) Match(table, field, s string) *TypeMap {
+	for _, v := range c {
+		if v.Tables == nil {
+			continue
+		}
+
+		if v.match(table, field, s) && (v.NotNullGoType != "" || v.NullableGoType != "") {
+			return v
+		}
+	}
+
+	for _, v := range c {
+		if v.Tables != nil {
+			continue
+		}
+
+		if v.match(table, field, s) && (v.NotNullGoType != "" || v.NullableGoType != "") {
+			return v
+		}
+	}
+
+	return nil
+}
+
+func (c PgTypeMapConfig) Tags(table, field, s string) string {
+
+	for _, v := range c {
+		if v.Tables == nil {
+			continue
+		}
+
+		if v.match(table, field, s) {
+			return v.Tags
+		}
+	}
+
+	return ""
+}
 
 // PgTable postgres table
 type PgTable struct {
@@ -383,33 +423,16 @@ func contains(v string, l []string) bool {
 
 // PgConvertType converts type
 func PgConvertType(t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) string {
-	typ := typeCfg["default"].NotNullGoType
-	for _, v := range typeCfg {
-		if v.Tables == nil {
-			continue
-		}
-
-		if v.Match(t.Name, col.Name, col.DataType) {
-			if col.NotNull {
-				return v.NotNullGoType
-			}
-			return v.NullableGoType
-		}
+	v := typeCfg.Match(t.Name, col.Name, col.DataType)
+	if v == nil {
+		return typeCfg["default"].NotNullGoType
 	}
 
-	for _, v := range typeCfg {
-		if v.Tables != nil {
-			continue
-		}
-
-		if v.Match(t.Name, col.Name, col.DataType) {
-			if col.NotNull {
-				return v.NotNullGoType
-			}
-			return v.NullableGoType
-		}
+	if col.NotNull {
+		return v.NotNullGoType
 	}
-	return typ
+
+	return v.NullableGoType
 }
 
 // PgColToField converts pg column to go struct field
@@ -420,10 +443,10 @@ func PgColToField(db Queryer, t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig
 		Type:   stfType,
 		Column: col,
 	}
-	return fillStructTags(db, stf, t, col)
+	return fillStructTags(db, stf, t, col, typeCfg)
 }
 
-func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*StructField, error) {
+func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn, typeCfg PgTypeMapConfig) (*StructField, error) {
 	var tags []string
 	if col.IsPrimaryKey {
 		tags = append(tags, `pk:"true"`)
@@ -474,6 +497,11 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn) (*St
 	var omit string
 	if omitEmpty {
 		omit = ",omitempty"
+	}
+
+	cfg := typeCfg.Tags(t.Name, col.Name, col.DataType)
+	if cfg != "" {
+		tags = append(tags, cfg)
 	}
 
 	tags = append([]string{fmt.Sprintf(`db:"%s" json:"%s%s"`, col.Name, col.Name, omit)}, tags...)
