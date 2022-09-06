@@ -170,7 +170,7 @@ func (t *TypeMap) match(table, field, s string) bool {
 		return false
 	}
 
-	if contains(s, t.DBTypes) {
+	if contains(s, t.DBTypes) || len(t.DBTypes) == 0 {
 		return true
 	}
 
