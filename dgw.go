@@ -256,7 +256,6 @@ func (t *PgTable) setPrimaryKeyInfo(cfg *AutoKeyMap) {
 			}
 		}
 	}
-	return
 }
 
 // PgColumn postgres columns
@@ -269,6 +268,8 @@ type PgColumn struct {
 	DefaultValue sql.NullString
 	IsPrimaryKey bool
 	IsUnique     bool
+	IsForeignKey bool
+	ForeignKey   string
 }
 
 // Struct go struct
@@ -468,6 +469,8 @@ func fillStructTags(db Queryer, st *StructField, t *PgTable, col *PgColumn, type
 
 	if fk != "" {
 		tags = append(tags, fmt.Sprintf(`fk:"%s"`, fk))
+		col.IsForeignKey = true
+		col.ForeignKey = fk
 	}
 
 	var omitEmpty bool
