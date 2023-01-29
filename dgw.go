@@ -806,6 +806,8 @@ var commonInitialisms = map[string]bool{
 	"XML":   true,
 	"PTO":   true,
 	"UTM":   true,
+	"QA":    true,
+	"ML":    true,
 }
 
 // PublicVarName formats a string as a public go variable name
