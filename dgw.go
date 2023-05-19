@@ -830,6 +830,10 @@ func PublicVarName(s string, isTable bool) string {
 		newName = strings.Replace(newName, "BackAc", "BankAc", 1)
 	}
 
+	if strings.Contains(newName, "Bonuses") {
+		return strings.Replace(newName, "Bonuses", "Bonus", 1)
+	}
+
 	if !isTable {
 		return newName
 	}
@@ -850,7 +854,13 @@ func PublicVarName(s string, isTable bool) string {
 		newName = strings.TrimSuffix(newName, "ies") + "y"
 	}
 
-	if strings.Index(newName, "Kids") == -1 && strings.Index(newName, "Days") == -1 && strings.Index(newName, "Comments") == -1 && strings.Index(newName, "atus") == -1 && strings.Index(newName, "ress") == -1 && name[len(newName)-1] == 's' {
+	if strings.Index(newName, "Kids") == -1 &&
+		strings.Index(newName, "Days") == -1 &&
+		strings.Index(newName, "Comments") == -1 &&
+		strings.Index(newName, "atus") == -1 &&
+		strings.Index(newName, "ress") == -1 &&
+		strings.Index(newName, "Bonus") == -1 &&
+		name[len(newName)-1] == 's' {
 		newName = newName[:len(newName)-1]
 	}
 
