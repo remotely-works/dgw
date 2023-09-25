@@ -842,7 +842,7 @@ func PublicVarName(s string, isTable bool) string {
 		newName = strings.Replace(newName, "Policies", "Policy", 1)
 	}
 
-	if strings.HasSuffix(newName, "People" {
+	if strings.HasSuffix(newName, "People") {
 		newName = strings.TrimSuffix(newName, "People") + "Person"
 	}
 
